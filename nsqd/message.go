@@ -1,68 +1,68 @@
 package nsqd
 
 import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
-	"io"
-	"time"
+        "bytes"
+        "encoding/binary"
+        "fmt"
+        "io"
+        "time"
 )
 
 const (
-	MsgIDLength       = 16
-	minValidMsgLength = MsgIDLength + 8 + 2 // Timestamp + Attempts
+        MsgIDLength       = 16
+        minValidMsgLength = MsgIDLength + 8 + 2 // Timestamp + Attempts
 )
 
 type MessageID [MsgIDLength]byte
 
 type Message struct {
-	ID        MessageID
-	Body      []byte
-	Timestamp int64
-	Attempts  uint16
+        ID        MessageID
+        Body      []byte
+        Timestamp int64  // message 发布时间
+        Attempts  uint16 // 重试推送次数
 
-	// for in-flight handling
-	deliveryTS time.Time
-	clientID   int64
-	pri        int64
-	index      int
-	deferred   time.Duration
+        // for in-flight handling
+        deliveryTS time.Time // 上次 进入InFlight队列时间, 即上次发送时间
+        clientID   int64
+        pri        int64 // deadline 时间 timestamp
+        index      int   // 在优先级队列中的index, 主要为了方便指定message 进行删除
+        deferred   time.Duration
 }
 
 func NewMessage(id MessageID, body []byte) *Message {
-	return &Message{
-		ID:        id,
-		Body:      body,
-		Timestamp: time.Now().UnixNano(),
-	}
+        return &Message{
+                ID:        id,
+                Body:      body,
+                Timestamp: time.Now().UnixNano(),
+        }
 }
 
 func (m *Message) WriteTo(w io.Writer) (int64, error) {
-	var buf [10]byte
-	var total int64
+        var buf [10]byte
+        var total int64
 
-	binary.BigEndian.PutUint64(buf[:8], uint64(m.Timestamp))
-	binary.BigEndian.PutUint16(buf[8:10], uint16(m.Attempts))
+        binary.BigEndian.PutUint64(buf[:8], uint64(m.Timestamp))
+        binary.BigEndian.PutUint16(buf[8:10], uint16(m.Attempts))
 
-	n, err := w.Write(buf[:])
-	total += int64(n)
-	if err != nil {
-		return total, err
-	}
+        n, err := w.Write(buf[:])
+        total += int64(n)
+        if err != nil {
+                return total, err
+        }
 
-	n, err = w.Write(m.ID[:])
-	total += int64(n)
-	if err != nil {
-		return total, err
-	}
+        n, err = w.Write(m.ID[:])
+        total += int64(n)
+        if err != nil {
+                return total, err
+        }
 
-	n, err = w.Write(m.Body)
-	total += int64(n)
-	if err != nil {
-		return total, err
-	}
+        n, err = w.Write(m.Body)
+        total += int64(n)
+        if err != nil {
+                return total, err
+        }
 
-	return total, nil
+        return total, nil
 }
 
 // decodeMessage deserializes data (as []byte) and creates a new Message
@@ -76,25 +76,25 @@ func (m *Message) WriteTo(w io.Writer) (int64, error) {
 //                         2-byte
 //                        attempts
 func decodeMessage(b []byte) (*Message, error) {
-	var msg Message
+        var msg Message
 
-	if len(b) < minValidMsgLength {
-		return nil, fmt.Errorf("invalid message buffer size (%d)", len(b))
-	}
+        if len(b) < minValidMsgLength {
+                return nil, fmt.Errorf("invalid message buffer size (%d)", len(b))
+        }
 
-	msg.Timestamp = int64(binary.BigEndian.Uint64(b[:8]))
-	msg.Attempts = binary.BigEndian.Uint16(b[8:10])
-	copy(msg.ID[:], b[10:10+MsgIDLength])
-	msg.Body = b[10+MsgIDLength:]
+        msg.Timestamp = int64(binary.BigEndian.Uint64(b[:8]))
+        msg.Attempts = binary.BigEndian.Uint16(b[8:10])
+        copy(msg.ID[:], b[10:10+MsgIDLength])
+        msg.Body = b[10+MsgIDLength:]
 
-	return &msg, nil
+        return &msg, nil
 }
 
 func writeMessageToBackend(buf *bytes.Buffer, msg *Message, bq BackendQueue) error {
-	buf.Reset()
-	_, err := msg.WriteTo(buf)
-	if err != nil {
-		return err
-	}
-	return bq.Put(buf.Bytes())
+        buf.Reset()
+        _, err := msg.WriteTo(buf)
+        if err != nil {
+                return err
+        }
+        return bq.Put(buf.Bytes())
 }
